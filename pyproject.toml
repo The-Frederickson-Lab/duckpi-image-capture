@@ -10,11 +10,13 @@ dependencies = [
   "zaber-motion (>=7.3.0,<8.0.0)",
   "pyyaml (>=6.0.2,<7.0.0)",
   "schema (>=0.7.7,<0.8.0)",
+  "rpi-gpio (>=0.7.1,<0.8.0)",
 ]
 
 [tool.poetry.group.dev.dependencies]
 black = "^25.1.0"
 pytest = "^8.3.4"
+ipykernel = "*"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
