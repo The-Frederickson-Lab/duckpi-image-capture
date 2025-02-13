@@ -3,8 +3,9 @@
 from enum import Enum
 import logging
 from os import path
-import time
+from pathlib import Path
 import subprocess
+import time
 from typing import List, Literal
 
 import RPi.GPIO as gp
@@ -154,12 +155,18 @@ def _take_still(camera_id: Literal["A", "B", "C", "D"], output_directory: str) -
     :rtype: str
     """
 
+    Path(path.join(output_directory, f"camera{camera_id}")).mkdir(
+        parents=True, exist_ok=True
+    )
+
     ts = time.strftime("%Y%m%d-%H%M%S")
     timestamped_image = f"{camera_id}-image-{ts}.jpg"
 
     output_file_path = f"{output_directory}/camera{camera_id}/{timestamped_image}"
     capture_image_command = f"sudo libcamera-still -t 10000 --camera {Cameras[camera_id].value} -o {output_file_path}"
-    subprocess.run(capture_image_command.split(), capture_output=True, check=True)
+    subprocess.run(
+        capture_image_command.split(), capture_output=True, check=True, timeout=20
+    )
     return output_file_path
 
 
