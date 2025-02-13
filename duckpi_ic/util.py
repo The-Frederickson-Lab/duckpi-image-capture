@@ -6,10 +6,11 @@ from yaml import safe_load
 
 
 def set_logger_debug(logger: logging.Logger):
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("%(message)s")
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    if len(logger.handlers) == 0:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter("%(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
 
 
