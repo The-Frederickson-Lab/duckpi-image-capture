@@ -4,6 +4,7 @@
 
 name: test-experiment
 output_dir: /tmp
+number_of_images: 4
 stages:
   -
     stage_distance:

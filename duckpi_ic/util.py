@@ -29,6 +29,7 @@ def validate_config(config: dict):
         {
             "name": And(str, len),
             "output_dir": And(str, len, path.exists),
+            "number_of_images": (int),
             "stages": [
                 Schema(
                     {

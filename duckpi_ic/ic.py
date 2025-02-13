@@ -5,7 +5,7 @@ import logging
 from os import path
 import time
 import subprocess
-from typing import Literal
+from typing import List, Literal
 
 import RPi.GPIO as gp
 from zaber_motion import Library, Units
@@ -163,7 +163,9 @@ def _take_still(camera_id: Literal["A", "B", "C", "D"], output_directory: str) -
     return output_file_path
 
 
-def take_still(camera_id: Literal["A", "B", "C", "D"], output_directory: str) -> str:
+def take_stills(
+    camera_id: Literal["A", "B", "C", "D"], output_directory: str, img_count: int
+) -> List[str]:
     """Rest pins, start camera, take, and save photo
 
     :param camera_id: The camera to use
@@ -174,14 +176,17 @@ def take_still(camera_id: Literal["A", "B", "C", "D"], output_directory: str) ->
     :return: The path of the image
     :rtype: str
     """
+    image_paths = []
     try:
         setup_gpio_pins()
         start_camera(camera_id)
-        img_path = _take_still(camera_id, output_directory)
+        for _ in range(0, img_count):
+            img_path = _take_still(camera_id, output_directory)
+            image_paths.append(img_path)
     finally:
         gp.cleanup()
 
-    return img_path
+    return image_paths
 
 
 def run(config_path: str, test: bool = False, debug: bool = False):
@@ -220,11 +225,13 @@ def run(config_path: str, test: bool = False, debug: bool = False):
                 )
                 for camera in Cameras:
                     # TODO: NUM_IMAGES
-                    image_path = take_still(camera.name, output_dir)
+                    image_paths = take_stills(
+                        camera.name, output_dir, experiment_config["number_of_images"]
+                    )
                     if FIRST:
-                        first_last.append(image_path)
+                        first_last.append(image_paths[0])
                         FIRST = False
-        first_last.append(image_path)
+        first_last.append(image_paths[-1])
     except Exception as e:
         logger.exception(e)
         # TODO: send error email
@@ -233,12 +240,13 @@ def run(config_path: str, test: bool = False, debug: bool = False):
         home_actuator()
 
     if not test:
+        logger.info("Not sending email (still testing!)...")
         # TODO: rsync (no delete) output_dir w/ remote_dir and cleanup output_dir
-        subprocess.run(
-            "python3.9 /home/minor/Desktop/Alert_user.py".split(),
-            check=True,
-            capture_output=True,
-        )
+        # subprocess.run(
+        #     "python3.9 /home/minor/Desktop/Alert_user.py".split(),
+        #     check=True,
+        #     capture_output=True,
+        # )
     else:
         return first_last
 
