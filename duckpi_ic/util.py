@@ -1,5 +1,5 @@
-from os import path
 import logging
+from os import path
 
 from schema import Schema, And, Optional
 from yaml import safe_load

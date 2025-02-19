@@ -6,7 +6,7 @@ from os import path
 from pathlib import Path
 import subprocess
 import time
-from typing import List, Literal
+from typing import List
 
 import RPi.GPIO as gp
 from zaber_motion import Library, Units
@@ -22,6 +22,7 @@ Library.enable_device_db_store()
 DEVICE_PORT = "/dev/ttyUSB0"
 
 
+# camera order from door: C (2), A (0), B (1), D (3)
 class Cameras(Enum):
     A = 0
     B = 1
@@ -87,11 +88,13 @@ def move_actuator(
     with Connection.open_serial_port(device_port) as connection:
         device_list = connection.detect_devices()
         axis = device_list[0].get_axis(1)
+        logger.debug(f"Moving actuator {distance} {unit}")
         axis.move_relative(distance, unit)
 
 
 def setup_gpio_pins():
     """Put GPIO pins in default configuration"""
+    logger.debug("setting up gpio pins")
     gp.cleanup()
     gp.setwarnings(True)
     gp.setmode(gp.BOARD)
@@ -110,7 +113,7 @@ def setup_gpio_pins():
     gp.output(22, True)
 
 
-def start_camera(camera_id: Literal["A", "B", "C", "D"]):
+def start_camera(camera_id: str):
     """Start the indicated camera
 
     :param camera_id: The string identifier of the camera
@@ -118,8 +121,8 @@ def start_camera(camera_id: Literal["A", "B", "C", "D"]):
     :raises ValueError: If an invalid identifier was passed
     """
 
-    if camera_id not in ["A", "B", "C", "D"]:
-        raise ValueError(f"Expected A-D, received {camera_id}")
+    if camera_id not in Cameras._member_names_:
+        raise ValueError(f"{','.join(Cameras._member_names_)}, received {camera_id}")
 
     if camera_id == "A":
         logger.debug("Starting camera A")
@@ -143,7 +146,7 @@ def start_camera(camera_id: Literal["A", "B", "C", "D"]):
         gp.output(12, False)
 
 
-def _take_still(camera_id: Literal["A", "B", "C", "D"], output_directory: str) -> str:
+def _take_still(camera_id: str, output_directory: str) -> str:
     """Take a still photo, camera is expected to have been started already
 
     :param camera_id: The camera id
@@ -163,16 +166,15 @@ def _take_still(camera_id: Literal["A", "B", "C", "D"], output_directory: str) -
     timestamped_image = f"{camera_id}-image-{ts}.jpg"
 
     output_file_path = f"{output_directory}/camera{camera_id}/{timestamped_image}"
-    capture_image_command = f"sudo libcamera-still -t 10000 --camera {Cameras[camera_id].value} -o {output_file_path}"
+    capture_image_command = f"sudo libcamera-still -n -t 10000 --camera {Cameras[camera_id].value} -o {output_file_path}"
     subprocess.run(
-        capture_image_command.split(), capture_output=True, check=True, timeout=20
+        capture_image_command.split(), capture_output=True, check=True, timeout=25
     )
+
     return output_file_path
 
 
-def take_stills(
-    camera_id: Literal["A", "B", "C", "D"], output_directory: str, img_count: int
-) -> List[str]:
+def take_stills(camera_id: str, output_directory: str, img_count: int) -> List[str]:
     """Rest pins, start camera, take, and save photo
 
     :param camera_id: The camera to use
@@ -187,16 +189,21 @@ def take_stills(
     try:
         setup_gpio_pins()
         start_camera(camera_id)
-        for _ in range(0, img_count):
+        for img_num in range(0, img_count):
+            logger.debug(f"Taking image number {img_num + 1}")
             img_path = _take_still(camera_id, output_directory)
             image_paths.append(img_path)
+    except Exception as e:
+        logger.exception(e)
+        raise
     finally:
+        logger.debug("cleaning up pins")
         gp.cleanup()
 
     return image_paths
 
 
-def run(config_path: str, test: bool = False, debug: bool = False):
+def run(config_path: str, test: bool = False, debug: bool = False) -> List[str]:
     """Perform a run of the experiment
 
     :param config_path: The path to the experiment configuration
@@ -227,11 +234,14 @@ def run(config_path: str, test: bool = False, debug: bool = False):
             )
             for row in range(stage["rows"]):
                 # row_distance is relative to previous row and assumes distance is uniform between rows
-                move_actuator(
-                    stage["row_distance"]["length"], stage["row_distance"].get("units")
-                )
+                # don't move actuator on first row, since it's assumed the initial distance
+                # is covered by stage_distance
+                if row > 0:
+                    move_actuator(
+                        stage["row_distance"]["length"],
+                        stage["row_distance"].get("units"),
+                    )
                 for camera in Cameras:
-                    # TODO: NUM_IMAGES
                     image_paths = take_stills(
                         camera.name, output_dir, experiment_config["number_of_images"]
                     )
@@ -247,15 +257,15 @@ def run(config_path: str, test: bool = False, debug: bool = False):
         home_actuator()
 
     if not test:
-        logger.info("Not sending email (still testing!)...")
+        logger.info("Not sending email, even though this is supposedly not a test...")
         # TODO: rsync (no delete) output_dir w/ remote_dir and cleanup output_dir
         # subprocess.run(
         #     "python3.9 /home/minor/Desktop/Alert_user.py".split(),
         #     check=True,
         #     capture_output=True,
         # )
-    else:
-        return first_last
+
+    return first_last
 
 
 if __name__ == "__main__":
