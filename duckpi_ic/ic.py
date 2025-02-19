@@ -277,6 +277,7 @@ def run_experiment(
 
     if not test:
         # TODO: rsync (no delete) output_dir w/ remote_dir and cleanup output_dir
+        logger.debug("Sending success email")
         send_success_email(
             experiment_config["emails"], first_last, experiment_config["name"]
         )

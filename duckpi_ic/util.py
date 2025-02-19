@@ -60,7 +60,7 @@ def _send_gmail(
 ):
     import dotenv
 
-    dotenv.load_dotenv()
+    dotenv.load_dotenv(path.join(path.dirname(path.dirname(__file__)), ".env"))
 
     SMTP_SERVER = getenv("SMTP_SERVER")
     SMTP_PORT = getenv("SMTP_PORT")
