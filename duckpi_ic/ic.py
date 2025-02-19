@@ -266,7 +266,10 @@ def run_experiment(
             traceback.format_exception(exc_type, exc_value, exc_traceback)
         )
         msg = "Error Message: " + "\n\n" + str(e) + "\n\n" + trace
-        send_error_email(experiment_config["emails"], experiment_config["name"], msg)
+        if not test:
+            send_error_email(
+                experiment_config["emails"], experiment_config["name"], msg
+            )
         raise
 
     finally:
