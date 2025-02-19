@@ -5,6 +5,9 @@
 name: test-experiment
 output_dir: /tmp
 number_of_images: 4
+emails:
+  - test@example.com
+  - test2@example.com
 stages:
   -
     stage_distance:
