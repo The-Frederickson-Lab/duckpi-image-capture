@@ -5,7 +5,9 @@ import logging
 from os import path
 from pathlib import Path
 import subprocess
+import sys
 import time
+import traceback
 from typing import List
 
 import RPi.GPIO as gp
@@ -13,7 +15,12 @@ from zaber_motion import Library, Units
 from zaber_motion.ascii import Connection
 from zaber_motion.units import LengthUnits
 
-from duckpi_ic.util import read_and_validate_config, set_logger_debug
+from duckpi_ic.util import (
+    read_and_validate_config,
+    send_error_email,
+    send_success_email,
+    set_logger_debug,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +210,9 @@ def take_stills(camera_id: str, output_directory: str, img_count: int) -> List[s
     return image_paths
 
 
-def run(config_path: str, test: bool = False, debug: bool = False) -> List[str]:
+def run_experiment(
+    config_path: str, test: bool = False, debug: bool = False
+) -> List[str]:
     """Perform a run of the experiment
 
     :param config_path: The path to the experiment configuration
@@ -249,21 +258,25 @@ def run(config_path: str, test: bool = False, debug: bool = False) -> List[str]:
                         first_last.append(image_paths[0])
                         FIRST = False
         first_last.append(image_paths[-1])
+
     except Exception as e:
         logger.exception(e)
-        # TODO: send error email
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        trace = "\n".join(
+            traceback.format_exception(exc_type, exc_value, exc_traceback)
+        )
+        msg = "Error Message: " + "\n\n" + str(e) + "\n\n" + trace
+        send_error_email(experiment_config["emails"], experiment_config["name"], msg)
         raise
+
     finally:
         home_actuator()
 
     if not test:
-        logger.info("Not sending email, even though this is supposedly not a test...")
         # TODO: rsync (no delete) output_dir w/ remote_dir and cleanup output_dir
-        # subprocess.run(
-        #     "python3.9 /home/minor/Desktop/Alert_user.py".split(),
-        #     check=True,
-        #     capture_output=True,
-        # )
+        send_success_email(
+            experiment_config["emails"], first_last, experiment_config["name"]
+        )
 
     return first_last
 
@@ -301,4 +314,4 @@ if __name__ == "__main__":
 
     args = vars(parser.parse_args())
 
-    run(**args)
+    run_experiment(**args)
