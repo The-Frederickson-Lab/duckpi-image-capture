@@ -1,5 +1,9 @@
+from email.message import EmailMessage
 import logging
-from os import path
+from os import path, getenv
+import smtplib
+from typing import Optional, List, Union
+
 
 from schema import Schema, And, Optional
 from yaml import safe_load
@@ -46,3 +50,67 @@ def validate_config(config: dict):
     )
 
     return schema.validate(config)
+
+
+def _send_gmail(
+    recipients: List[str],
+    subject: str,
+    content: str,
+    attachment_paths: Union[List[str], None] = None,
+):
+    import dotenv
+
+    dotenv.load_dotenv()
+
+    SMTP_SERVER = getenv("SMTP_SERVER")
+    SMTP_PORT = getenv("SMTP_PORT")
+    GMAIL_USERNAME = getenv("GMAIL_USERNAME")
+    GMAIL_PASSWORD = getenv("GMAIL_PASSWORD")
+    ADMIN_EMAIL = getenv("ADMIN_EMAIL")
+
+    assert SMTP_SERVER
+    assert SMTP_PORT
+    assert GMAIL_USERNAME
+    assert GMAIL_PASSWORD
+    assert ADMIN_EMAIL
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+
+    msg["From"] = ADMIN_EMAIL
+    msg["To"] = ", ".join(recipients)
+    msg.set_content(content)
+
+    if attachment_paths:
+        for file in attachment_paths:
+            with open(file, "rb") as fp:
+                img_data = fp.read()
+            msg.add_attachment(
+                img_data, maintype="image", subtype="jpeg", filename=path.basename(file)
+            )
+
+    with smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT)) as session:
+        session.ehlo()
+        session.starttls()
+        session.ehlo()
+
+        session.login(GMAIL_USERNAME, GMAIL_PASSWORD)
+
+        session.send_message(msg)
+
+
+def send_success_email(
+    recipients: List[str], image_paths: List[str], experiment_name: str
+):
+    message = f"{experiment_name} name ran successfully."
+    subject = f"{experiment_name.title()} Success."
+    return _send_gmail(recipients, subject, message, image_paths)
+
+
+def send_error_email(recipients: List[str], experiment_name: str, error_message: str):
+    message = (
+        f"{experiment_name} name encountered an error."
+        + f"\n\nError message: {error_message}"
+    )
+    subject = f"{experiment_name.title()} Error."
+    return _send_gmail(recipients, subject, message)
