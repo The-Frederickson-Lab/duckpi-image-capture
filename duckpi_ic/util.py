@@ -102,7 +102,7 @@ def _send_gmail(
 def send_success_email(
     recipients: List[str], image_paths: List[str], experiment_name: str
 ):
-    message = f"{experiment_name} name ran successfully."
+    message = f"{experiment_name} ran successfully."
     subject = f"{experiment_name.title()} Success."
     return _send_gmail(recipients, subject, message, image_paths)
 

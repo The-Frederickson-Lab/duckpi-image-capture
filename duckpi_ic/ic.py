@@ -12,7 +12,7 @@ from typing import List
 
 import RPi.GPIO as gp
 from zaber_motion import Library, Units
-from zaber_motion.ascii import Connection
+from zaber_motion.ascii import Axis, Connection
 from zaber_motion.units import LengthUnits
 
 from duckpi_ic.util import (
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 Library.enable_device_db_store()
 
+
 DEVICE_PORT = "/dev/ttyUSB0"
 
 
@@ -37,14 +38,16 @@ class Cameras(Enum):
     D = 3
 
 
-def set_defaults(
+def set_axis_defaults(
+    axis: Axis,
     acceleration: int = 2,
     deceleration: int = 2,
-    device_port: str = DEVICE_PORT,
     max_speed: int = 20,
 ):
-    """Set actuator defaults and move to first plate position
+    """Set actuator defaults
 
+    :param axis: the axis whose settings we want to set
+    :type axis: Axis
     :param acceleration: defaults to 2
     :type acceleration: int, optional
     :param deceleration:  defaults to 2
@@ -54,15 +57,12 @@ def set_defaults(
     :param max_speed: defaults to 20
     :type max_speed: int, optional
     """
-    with Connection.open_serial_port(device_port) as connection:
-        device_list = connection.detect_devices()
-        axis = device_list[0].get_axis(1)
-        # set to gentle maximum speed
-        axis.settings.set("maxspeed", max_speed, Units.VELOCITY_MILLIMETRES_PER_SECOND)
-        # set to gentle acceleration
-        axis.settings.set("motion.accelonly", acceleration, Units.NATIVE)
-        # set to gentle deceleration
-        axis.settings.set("motion.decelonly", deceleration, Units.NATIVE)
+    # set to gentle maximum speed
+    axis.settings.set("maxspeed", max_speed, Units.VELOCITY_MILLIMETRES_PER_SECOND)
+    # set to gentle acceleration
+    axis.settings.set("motion.accelonly", acceleration, Units.NATIVE)
+    # set to gentle deceleration
+    axis.settings.set("motion.decelonly", deceleration, Units.NATIVE)
 
 
 def home_actuator(device_port: str = DEVICE_PORT):
@@ -75,6 +75,7 @@ def home_actuator(device_port: str = DEVICE_PORT):
     with Connection.open_serial_port(device_port) as connection:
         device_list = connection.detect_devices()
         axis = device_list[0].get_axis(1)
+        set_axis_defaults(axis)
         axis.home()
 
 
@@ -95,6 +96,7 @@ def move_actuator(
     with Connection.open_serial_port(device_port) as connection:
         device_list = connection.detect_devices()
         axis = device_list[0].get_axis(1)
+        set_axis_defaults(axis)
         logger.debug(f"Moving actuator {distance} {unit}")
         axis.move_relative(distance, unit)
 
@@ -229,7 +231,6 @@ def run_experiment(
     experiment_config = read_and_validate_config(config_path)
 
     try:
-        set_defaults()
         home_actuator()
         output_dir = path.join(
             experiment_config["output_dir"], experiment_config["name"]
