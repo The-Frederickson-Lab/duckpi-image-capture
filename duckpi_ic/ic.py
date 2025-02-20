@@ -155,7 +155,7 @@ def start_camera(camera_id: str):
         gp.output(12, False)
 
 
-def _take_still(camera_id: str, output_directory: str) -> str:
+def _take_still(camera_id: str, output_directory: str, filename: str) -> str:
     """Take a still photo, camera is expected to have been started already
 
     :param camera_id: The camera id
@@ -171,10 +171,7 @@ def _take_still(camera_id: str, output_directory: str) -> str:
         parents=True, exist_ok=True
     )
 
-    ts = time.strftime("%Y%m%d-%H%M%S")
-    timestamped_image = f"{camera_id}-image-{ts}.jpg"
-
-    output_file_path = f"{output_directory}/camera{camera_id}/{timestamped_image}"
+    output_file_path = f"{output_directory}/camera{camera_id}/{filename}"
     capture_image_command = f"sudo libcamera-still -n -t 10000 --camera {Cameras[camera_id].value} -o {output_file_path}"
     subprocess.run(
         capture_image_command.split(), capture_output=True, check=True, timeout=25
@@ -183,7 +180,9 @@ def _take_still(camera_id: str, output_directory: str) -> str:
     return output_file_path
 
 
-def take_stills(camera_id: str, output_directory: str, img_count: int) -> List[str]:
+def take_stills(
+    camera_id: str, output_directory: str, filename: str, img_count: int
+) -> List[str]:
     """Rest pins, start camera, take, and save photo
 
     :param camera_id: The camera to use
@@ -200,7 +199,7 @@ def take_stills(camera_id: str, output_directory: str, img_count: int) -> List[s
         start_camera(camera_id)
         for img_num in range(0, img_count):
             logger.debug(f"Taking image number {img_num + 1}")
-            img_path = _take_still(camera_id, output_directory)
+            img_path = _take_still(camera_id, output_directory, filename)
             image_paths.append(img_path)
     except Exception as e:
         logger.exception(e)
@@ -237,7 +236,7 @@ def run_experiment(
         )
         FIRST = True
         first_last = []
-        for stage in experiment_config["stages"]:
+        for i, stage in enumerate(experiment_config["stages"]):
             # stage_distance is relative to previous row
             move_actuator(
                 stage["stage_distance"]["length"], stage["stage_distance"].get("units")
@@ -252,8 +251,13 @@ def run_experiment(
                         stage["row_distance"].get("units"),
                     )
                 for camera in Cameras:
+                    ts = time.strftime("%Y%m%d-%H%M%S")
+                    filename = f"cam_{camera.name}_{i+1}_{row+1}_{ts}.jpg"
                     image_paths = take_stills(
-                        camera.name, output_dir, experiment_config["number_of_images"]
+                        camera.name,
+                        output_dir,
+                        filename,
+                        experiment_config["number_of_images"],
                     )
                     if FIRST:
                         first_last.append(image_paths[0])
