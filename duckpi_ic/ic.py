@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 import traceback
-from typing import List
+from typing import Any, List
 
 import RPi.GPIO as gp
 from zaber_motion import Library, Units
@@ -234,8 +234,7 @@ def run_experiment(
         output_dir = path.join(
             experiment_config["output_dir"], experiment_config["name"]
         )
-        FIRST = True
-        first_last = []
+        first_last: List[Any] = [None, None]
         for i, stage in enumerate(experiment_config["stages"]):
             # stage_distance is relative to previous row
             move_actuator(
@@ -251,18 +250,21 @@ def run_experiment(
                         stage["row_distance"].get("units"),
                     )
                 for camera in Cameras:
+
                     ts = time.strftime("%Y%m%d-%H%M%S")
                     filename = f"cam_{camera.name}_{i+1}_{row+1}_{ts}.jpg"
+
                     image_paths = take_stills(
                         camera.name,
                         output_dir,
                         filename,
                         experiment_config["number_of_images"],
                     )
-                    if FIRST:
-                        first_last.append(image_paths[0])
-                        FIRST = False
-        first_last.append(image_paths[-1])
+
+                    if first_last[0] is None:
+                        first_last[0] = image_paths[0]
+                    else:
+                        first_last[1] = image_paths[-1]
 
     except Exception as e:
         logger.exception(e)
@@ -273,7 +275,10 @@ def run_experiment(
         msg = "Error Message: " + "\n\n" + str(e) + "\n\n" + trace
         if not test:
             send_error_email(
-                experiment_config["emails"], experiment_config["name"], msg
+                experiment_config["emails"],
+                experiment_config["name"],
+                msg,
+                [p for p in first_last if p is not None],
             )
         raise
 
@@ -284,7 +289,9 @@ def run_experiment(
         # TODO: rsync (no delete) output_dir w/ remote_dir and cleanup output_dir
         logger.debug("Sending success email")
         send_success_email(
-            experiment_config["emails"], first_last, experiment_config["name"]
+            experiment_config["emails"],
+            experiment_config["name"],
+            first_last,
         )
 
     return first_last

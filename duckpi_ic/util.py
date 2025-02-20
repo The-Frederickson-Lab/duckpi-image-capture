@@ -100,17 +100,24 @@ def _send_gmail(
 
 
 def send_success_email(
-    recipients: List[str], image_paths: List[str], experiment_name: str
+    recipients: List[str],
+    experiment_name: str,
+    image_paths: List[str],
 ):
     message = f"{experiment_name} ran successfully."
-    subject = f"{experiment_name.title()} Success."
+    subject = f"{experiment_name.title()} Success"
     return _send_gmail(recipients, subject, message, image_paths)
 
 
-def send_error_email(recipients: List[str], experiment_name: str, error_message: str):
+def send_error_email(
+    recipients: List[str],
+    experiment_name: str,
+    error_message: str,
+    image_paths: List[str],
+):
     message = (
         f"{experiment_name} name encountered an error."
         + f"\n\nError message: {error_message}"
     )
-    subject = f"{experiment_name.title()} Error."
-    return _send_gmail(recipients, subject, message)
+    subject = f"{experiment_name.title()} Error"
+    return _send_gmail(recipients, subject, message, image_paths)
