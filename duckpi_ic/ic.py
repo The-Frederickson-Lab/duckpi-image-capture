@@ -2,25 +2,30 @@
 
 from enum import Enum
 import logging
-from os import path
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+from tempfile import mkstemp
 import time
 import traceback
-from typing import Any, List
+from typing import List
 
+from fabric import Connection as FabricConnection
 import RPi.GPIO as gp
 from zaber_motion import Library, Units
 from zaber_motion.ascii import Axis, Connection
 from zaber_motion.units import LengthUnits
 
+from duckpi_ic.settings import settings
 from duckpi_ic.util import (
     read_and_validate_config,
     send_error_email,
     send_success_email,
     set_logger_debug,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +172,7 @@ def _take_still(camera_id: str, output_directory: str, filename: str) -> str:
     :rtype: str
     """
 
-    Path(path.join(output_directory, f"camera{camera_id}")).mkdir(
+    Path(os.path.join(output_directory, f"camera{camera_id}")).mkdir(
         parents=True, exist_ok=True
     )
 
@@ -211,6 +216,56 @@ def take_stills(
     return image_paths
 
 
+def make_filename(camera: str, stage: int, row: int):
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    return f"cam_{camera}_{stage}_{row}_{ts}.jpg"
+
+
+def move_files_to_remote(c: FabricConnection, local_paths: List[str], name: str):
+    remote_save_dir = settings.REMOTE_SAVE_DIR
+    assert remote_save_dir
+    relpaths = [os.path.sep.join(p.split(os.path.sep)[-2:]) for p in local_paths]
+    remote_root = os.path.join(remote_save_dir, name)
+    failures = []
+    for relpath, local_path in zip(relpaths, local_paths):
+        try:
+            logger.debug(f"Moving {local_path} to {os.path.join(remote_root, relpath)}")
+            c.put(local_path, os.path.join(remote_root, relpath))
+            SUCCESS = True
+        except Exception as e:
+            logger.exception(e)
+            failures.append(local_path)
+            SUCCESS = False
+        if SUCCESS:
+            logger.debug(f"deleting {local_path}")
+            os.remove(local_path)
+    return failures
+
+
+def update_first_last(first_last: List[str], local_paths: List[str]):
+    first, last = first_last
+    if os.stat(first).st_size == 0:
+        shutil.copy2(local_paths[0], first)
+    else:
+        shutil.copy2(local_paths[-1], last)
+
+
+def get_first_last_tmp_paths() -> List[str]:
+    _, tmp1 = mkstemp(suffix=".jpg")
+    _, tmp2 = mkstemp(suffix=".jpg")
+    return [tmp1, tmp2]
+
+
+def ensure_remote_dirs_exist(remote_host_name, experiment_name):
+    remote_save_dir = settings.REMOTE_SAVE_DIR
+    assert remote_save_dir
+    with FabricConnection(remote_host_name) as c:
+        with c.cd(remote_save_dir):
+            c.run(f"mkdir -p {experiment_name}")
+            for cam in Cameras:
+                c.run(f"mkdir -p camera{cam}")
+
+
 def run_experiment(
     config_path: str, test: bool = False, debug: bool = False
 ) -> List[str]:
@@ -228,13 +283,21 @@ def run_experiment(
         set_logger_debug(logger)
 
     experiment_config = read_and_validate_config(config_path)
+    remote_host_name = settings.REMOTE_HOST_NAME
+    assert remote_host_name
+
+    experiment_name = experiment_config["name"]
+
+    first_last = get_first_last_tmp_paths()
+
+    local_save_dir = os.path.join(experiment_config["output_dir"], experiment_name)
+
+    if not test:
+        ensure_remote_dirs_exist(remote_host_name, experiment_name)
 
     try:
         home_actuator()
-        output_dir = path.join(
-            experiment_config["output_dir"], experiment_config["name"]
-        )
-        first_last: List[Any] = [None, None]
+
         for i, stage in enumerate(experiment_config["stages"]):
             # stage_distance is relative to previous row
             move_actuator(
@@ -251,22 +314,24 @@ def run_experiment(
                     )
                 for camera in Cameras:
 
-                    ts = time.strftime("%Y%m%d-%H%M%S")
-                    filename = f"cam_{camera.name}_{i+1}_{row+1}_{ts}.jpg"
-
-                    image_paths = take_stills(
+                    filename = make_filename(camera.name, i + 1, row + 1)
+                    local_paths = take_stills(
                         camera.name,
-                        output_dir,
+                        local_save_dir,
                         filename,
                         experiment_config["number_of_images"],
                     )
 
-                    if first_last[0] is None:
-                        first_last[0] = image_paths[0]
-                    else:
-                        first_last[1] = image_paths[-1]
+                    update_first_last(first_last, local_paths)
+
+                    if not test:
+                        with FabricConnection(remote_host_name) as c:
+                            unmoved = move_files_to_remote(
+                                c, local_paths, experiment_name
+                            )
 
     except Exception as e:
+        # TODO: move into function
         logger.exception(e)
         exc_type, exc_value, exc_traceback = sys.exc_info()
         trace = "\n".join(
@@ -276,7 +341,7 @@ def run_experiment(
         if not test:
             send_error_email(
                 experiment_config["emails"],
-                experiment_config["name"],
+                experiment_name,
                 msg,
                 [p for p in first_last if p is not None],
             )
@@ -286,7 +351,6 @@ def run_experiment(
         home_actuator()
 
     if not test:
-        # TODO: rsync (no delete) output_dir w/ remote_dir and cleanup output_dir
         logger.debug("Sending success email")
         send_success_email(
             experiment_config["emails"],

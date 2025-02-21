@@ -1,12 +1,13 @@
 from email.message import EmailMessage
 import logging
-from os import path, getenv
+from os import path
 import smtplib
 from typing import Optional, List, Union
 
-
 from schema import Schema, And, Optional
 from yaml import safe_load
+
+from duckpi_ic.settings import settings
 
 
 def set_logger_debug(logger: logging.Logger):
@@ -58,21 +59,12 @@ def _send_gmail(
     content: str,
     attachment_paths: Union[List[str], None] = None,
 ):
-    import dotenv
 
-    dotenv.load_dotenv(path.join(path.dirname(path.dirname(__file__)), ".env"))
-
-    SMTP_SERVER = getenv("SMTP_SERVER")
-    SMTP_PORT = getenv("SMTP_PORT")
-    GMAIL_USERNAME = getenv("GMAIL_USERNAME")
-    GMAIL_PASSWORD = getenv("GMAIL_PASSWORD")
-    ADMIN_EMAIL = getenv("ADMIN_EMAIL")
-
-    assert SMTP_SERVER
-    assert SMTP_PORT
-    assert GMAIL_USERNAME
-    assert GMAIL_PASSWORD
-    assert ADMIN_EMAIL
+    SMTP_SERVER = settings.SMTP_SERVER
+    SMTP_PORT = settings.SMTP_PORT
+    GMAIL_USERNAME = settings.GMAIL_USERNAME
+    GMAIL_PASSWORD = settings.GMAIL_PASSWORD
+    ADMIN_EMAIL = settings.ADMIN_EMAIL
 
     msg = EmailMessage()
     msg["Subject"] = subject

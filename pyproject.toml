@@ -12,6 +12,8 @@ dependencies = [
   "schema (>=0.7.7,<0.8.0)",
   "rpi-gpio (>=0.7.1,<0.8.0)",
   "python-dotenv (>=1.0.1,<2.0.0)",
+  "cryptography",
+  "fabric (>=3.2.2,<4.0.0)",
 ]
 
 [tool.poetry.group.dev.dependencies]
