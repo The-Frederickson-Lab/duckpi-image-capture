@@ -82,6 +82,7 @@ def home_actuator(device_port: str = DEVICE_PORT):
         axis = device_list[0].get_axis(1)
         set_axis_defaults(axis)
         axis.home()
+        time.sleep(1)
 
 
 def move_actuator(
@@ -102,8 +103,10 @@ def move_actuator(
         device_list = connection.detect_devices()
         axis = device_list[0].get_axis(1)
         set_axis_defaults(axis)
+
         logger.debug(f"Moving actuator {distance} {unit}")
         axis.move_relative(distance, unit)
+        time.sleep(1)
 
 
 def setup_gpio_pins():
@@ -160,13 +163,15 @@ def start_camera(camera_id: str):
         gp.output(12, False)
 
 
-def _take_still(camera_id: str, output_directory: str, filename: str) -> str:
+def _take_still(camera_id: str, output_directory: str, base_filename: str) -> str:
     """Take a still photo, camera is expected to have been started already
 
     :param camera_id: The camera id
     :type camera_id: Literal[&quot;A&quot;, &quot;B&quot;, &quot;C&quot;, &quot;D&quot;]
     :param output_directory: Where to save the output
     :type output_directory: str
+    :param base_filename: The untimestamped filename
+    :type base_filename: str
 
     :return: The path of the image
     :rtype: str
@@ -176,7 +181,9 @@ def _take_still(camera_id: str, output_directory: str, filename: str) -> str:
         parents=True, exist_ok=True
     )
 
-    output_file_path = f"{output_directory}/camera{camera_id}/{filename}"
+    output_file_path = os.path.join(
+        output_directory, f"camera{camera_id}", make_filename_ts(base_filename)
+    )
     capture_image_command = f"sudo libcamera-still -n -t 10000 --camera {Cameras[camera_id].value} -o {output_file_path}"
     subprocess.run(
         capture_image_command.split(), capture_output=True, check=True, timeout=25
@@ -186,7 +193,7 @@ def _take_still(camera_id: str, output_directory: str, filename: str) -> str:
 
 
 def take_stills(
-    camera_id: str, output_directory: str, filename: str, img_count: int
+    camera_id: str, output_directory: str, base_filename: str, img_count: int
 ) -> List[str]:
     """Rest pins, start camera, take, and save photo
 
@@ -204,7 +211,7 @@ def take_stills(
         start_camera(camera_id)
         for img_num in range(0, img_count):
             logger.debug(f"Taking image number {img_num + 1}")
-            img_path = _take_still(camera_id, output_directory, filename)
+            img_path = _take_still(camera_id, output_directory, base_filename)
             image_paths.append(img_path)
     except Exception as e:
         logger.exception(e)
@@ -216,12 +223,18 @@ def take_stills(
     return image_paths
 
 
-def make_filename(camera: str, stage: int, row: int):
+def make_filename_base(camera: str, stage: int, row: int) -> str:
+    return f"cam_{camera}_{stage}_{row}"
+
+
+def make_filename_ts(filename_base) -> str:
     ts = time.strftime("%Y%m%d-%H%M%S")
-    return f"cam_{camera}_{stage}_{row}_{ts}.jpg"
+    return f"{filename_base}_{ts}.jpg"
 
 
-def move_files_to_remote(c: FabricConnection, local_paths: List[str], name: str):
+def move_files_to_remote(
+    c: FabricConnection, local_paths: List[str], name: str
+) -> List[str]:
     remote_save_dir = settings.REMOTE_SAVE_DIR
     assert remote_save_dir
     relpaths = [os.path.sep.join(p.split(os.path.sep)[-2:]) for p in local_paths]
@@ -242,7 +255,7 @@ def move_files_to_remote(c: FabricConnection, local_paths: List[str], name: str)
     return failures
 
 
-def update_first_last(first_last: List[str], local_paths: List[str]):
+def update_first_last(first_last: List[str], local_paths: List[str]) -> None:
     first, last = first_last
     if os.stat(first).st_size == 0:
         shutil.copy2(local_paths[0], first)
@@ -256,14 +269,28 @@ def get_first_last_tmp_paths() -> List[str]:
     return [tmp1, tmp2]
 
 
-def ensure_remote_dirs_exist(remote_host_name, experiment_name):
+def ensure_remote_dirs_exist(remote_host_name, experiment_name) -> None:
     remote_save_dir = settings.REMOTE_SAVE_DIR
     assert remote_save_dir
     with FabricConnection(remote_host_name) as c:
         with c.cd(remote_save_dir):
             c.run(f"mkdir -p {experiment_name}")
-            for cam in Cameras:
-                c.run(f"mkdir -p camera{cam}")
+            with c.cd(experiment_name):
+                for cam in Cameras:
+                    c.run(f"mkdir -p camera{cam.name}")
+
+
+def make_unmoved_msg(unmoved_files: List[str]) -> str:
+    msg = ""
+
+    if len(unmoved_files):
+        msg = (
+            "The following files could not be saved remotely\n\n"
+            + "\n".join(unmoved_files)
+            + "\n\n"
+        )
+
+    return msg
 
 
 def run_experiment(
@@ -295,6 +322,8 @@ def run_experiment(
     if not test:
         ensure_remote_dirs_exist(remote_host_name, experiment_name)
 
+    unmoved_files = []
+
     try:
         home_actuator()
 
@@ -314,11 +343,11 @@ def run_experiment(
                     )
                 for camera in Cameras:
 
-                    filename = make_filename(camera.name, i + 1, row + 1)
+                    base_filename = make_filename_base(camera.name, i + 1, row + 1)
                     local_paths = take_stills(
                         camera.name,
                         local_save_dir,
-                        filename,
+                        base_filename,
                         experiment_config["number_of_images"],
                     )
 
@@ -326,9 +355,12 @@ def run_experiment(
 
                     if not test:
                         with FabricConnection(remote_host_name) as c:
-                            unmoved = move_files_to_remote(
+                            logger.debug("Sending files to remote server")
+                            _unmoved = move_files_to_remote(
                                 c, local_paths, experiment_name
                             )
+
+                            unmoved_files.extend(_unmoved)
 
     except Exception as e:
         # TODO: move into function
@@ -337,7 +369,10 @@ def run_experiment(
         trace = "\n".join(
             traceback.format_exception(exc_type, exc_value, exc_traceback)
         )
-        msg = "Error Message: " + "\n\n" + str(e) + "\n\n" + trace
+
+        unmoved_msg = make_unmoved_msg(unmoved_files)
+
+        msg = unmoved_msg + str(e) + "\n\n" + trace
         if not test:
             send_error_email(
                 experiment_config["emails"],
@@ -348,13 +383,20 @@ def run_experiment(
         raise
 
     finally:
+        time.sleep(1)
         home_actuator()
 
     if not test:
         logger.debug("Sending success email")
+
+        unmoved_msg = make_unmoved_msg(unmoved_files)
+
+        message = unmoved_msg + "The experiment ran successfully."
+
         send_success_email(
             experiment_config["emails"],
             experiment_config["name"],
+            message,
             first_last,
         )
 

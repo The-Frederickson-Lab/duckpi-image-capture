@@ -3,14 +3,13 @@ import os
 from fabric.connection import Connection as FabricConnection
 from unittest.mock import Mock, call, create_autospec
 
-from duckpi_ic.ic import make_filename, move_files_to_remote, update_first_last
+from duckpi_ic.ic import make_filename_base, move_files_to_remote, update_first_last
 
 
 def test_make_filename():
     """Test that we can make a filename according to spec"""
-    filename = make_filename(camera="A", stage=1, row=2)
-    assert filename.startswith("cam_A_1_2_")
-    assert filename.endswith(".jpg")
+    filename = make_filename_base(camera="A", stage=1, row=2)
+    assert filename == "cam_A_1_2"
 
 
 def test_update_first_last(tmp_path):
@@ -45,9 +44,11 @@ def test_update_first_last(tmp_path):
 def test_move_to_remote(monkeypatch):
     """Test that move_to_remote handles paths correctly"""
 
+    from duckpi_ic.settings import settings
+
     mock_remote_save_path = "/path/to/remote/home"
 
-    monkeypatch.setenv("REMOTE_SAVE_DIR", mock_remote_save_path)
+    monkeypatch.setattr(settings, "REMOTE_SAVE_DIR", mock_remote_save_path)
 
     mock_fabric_connection = Mock(FabricConnection)
 

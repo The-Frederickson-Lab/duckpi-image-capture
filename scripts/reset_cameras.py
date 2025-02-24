@@ -15,6 +15,7 @@ Note that the files are deleted as soon as the program exits.
 import logging
 from os import listdir
 from tempfile import TemporaryDirectory
+import time
 
 from duckpi_ic.ic import take_stills, Cameras
 from duckpi_ic.util import set_logger_debug
@@ -27,9 +28,10 @@ error_count = 0
 with TemporaryDirectory() as tmpdirname:
     for camera in Cameras._member_names_:
         try:
-            take_stills(camera, tmpdirname, 1)
+            take_stills(camera, tmpdirname, "test.jpg", 1)
         except Exception as e:
             dp_logger.exception(e)
             error_count += 1
+            time.sleep(2)
 
     print(f"Took {len(listdir(tmpdirname))} photos with {error_count} errors")
