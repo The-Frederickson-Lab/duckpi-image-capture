@@ -12,6 +12,8 @@ Note that the python `fabric` package requires `libffi-dev` and `libssl-dev`, wh
 
 Note also that `fabric` will use the `config` file in `~/.ssh` to configure connections to the remote host, so make sure that the remote host has an entry in `~/.ssh/config` before running an experiment that saves results to remote.
 
+The `picamera2` package should also be installed. It is best to do so with `apt` rather than `poetry` in order to avoid system dependency issues.
+
 ## Notes
 
 [ImagingSystemCode_22-8-24_aquascape_full.py](ImagingSystemCode_22-8-24_aquascape_full.py) is an archive of the image capture script currently on pi 44.

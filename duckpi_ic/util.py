@@ -11,11 +11,11 @@ from duckpi_ic.settings import settings
 
 
 def set_logger_debug(logger: logging.Logger):
-    if len(logger.handlers) == 0:
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter("%(message)s")
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+    logger.handlers.clear()
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter("%(name)s %(levelname)s: %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
 
 

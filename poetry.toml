@@ -1,5 +1,9 @@
 [virtualenvs]
 in-project = true
 
+[virtualenvs.options]
+# needed for system-wide install of picamera2
+system-site-packages = true
+
 [keyring]
 enabled = false

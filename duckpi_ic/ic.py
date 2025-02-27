@@ -3,9 +3,7 @@
 from enum import Enum
 import logging
 import os
-from pathlib import Path
 import shutil
-import subprocess
 import sys
 from tempfile import mkstemp
 import time
@@ -13,10 +11,12 @@ import traceback
 from typing import List
 
 from fabric import Connection as FabricConnection
+from picamera2 import Picamera2
 import RPi.GPIO as gp
 from zaber_motion import Library, Units
 from zaber_motion.ascii import Axis, Connection
 from zaber_motion.units import LengthUnits
+
 
 from duckpi_ic.settings import settings
 from duckpi_ic.util import (
@@ -36,11 +36,28 @@ DEVICE_PORT = "/dev/ttyUSB0"
 
 
 # camera order from door: C (2), A (0), B (1), D (3)
+# maybe? seems different when we use picamera2
 class Cameras(Enum):
     A = 0
     B = 1
     C = 2
     D = 3
+
+
+class DuckCam(Picamera2):
+    def __init__(self, cam: Cameras, tuning=None):
+        setup_gpio_pins()
+        start_camera(cam.name)
+
+        super().__init__(
+            camera_num=cam.value,
+            tuning=tuning,
+        )
+
+    def __exit__(self, exc_type, exc_val, exc_traceback):
+        logger.debug("Cleaning up pins")
+        gp.cleanup()
+        super().__exit__(exc_type, exc_val, exc_traceback)
 
 
 def set_axis_defaults(
@@ -162,65 +179,39 @@ def start_camera(camera_id: str):
         gp.output(11, True)
         gp.output(12, False)
 
-
-def _take_still(camera_id: str, output_directory: str, base_filename: str) -> str:
-    """Take a still photo, camera is expected to have been started already
-
-    :param camera_id: The camera id
-    :type camera_id: Literal[&quot;A&quot;, &quot;B&quot;, &quot;C&quot;, &quot;D&quot;]
-    :param output_directory: Where to save the output
-    :type output_directory: str
-    :param base_filename: The untimestamped filename
-    :type base_filename: str
-
-    :return: The path of the image
-    :rtype: str
-    """
-
-    Path(os.path.join(output_directory, f"camera{camera_id}")).mkdir(
-        parents=True, exist_ok=True
-    )
-
-    output_file_path = os.path.join(
-        output_directory, f"camera{camera_id}", make_filename_ts(base_filename)
-    )
-    capture_image_command = f"sudo libcamera-still -n -t 10000 --camera {Cameras[camera_id].value} -o {output_file_path}"
-    subprocess.run(
-        capture_image_command.split(), capture_output=True, check=True, timeout=25
-    )
-
-    return output_file_path
+    time.sleep(1)
 
 
 def take_stills(
-    camera_id: str, output_directory: str, base_filename: str, img_count: int
+    camera: Cameras, output_directory: str, base_filename: str, img_count: int
 ) -> List[str]:
     """Rest pins, start camera, take, and save photo
 
-    :param camera_id: The camera to use
-    :type camera_id: Literal[&quot;A&quot;, &quot;B&quot;, &quot;C&quot;, &quot;D&quot;]
+    :param camera: The camera to use
+    :type camera: Cameras
     :param output_directory: Where to save the image
     :type output_directory: str
+    :param base_filename: Path of the main local storage directory for this experiment
+    :type base_filename: str
+    :param img_count: The number of images to capture
+    :type base_filename: int
 
-    :return: The path of the image
-    :rtype: str
+    :return: The paths of the images
+    :rtype: List[str]
     """
-    image_paths = []
-    try:
-        setup_gpio_pins()
-        start_camera(camera_id)
-        for img_num in range(0, img_count):
-            logger.debug(f"Taking image number {img_num + 1}")
-            img_path = _take_still(camera_id, output_directory, base_filename)
-            image_paths.append(img_path)
-    except Exception as e:
-        logger.exception(e)
-        raise
-    finally:
-        logger.debug("cleaning up pins")
-        gp.cleanup()
 
-    return image_paths
+    output_file_path = os.path.join(
+        output_directory, f"camera{camera.name}", make_filename_ts(base_filename)
+    )
+
+    logger.debug(f"Saving {img_count} images to {output_file_path}")
+
+    with DuckCam(camera) as cam:
+        cam.start_and_capture_files(
+            name=output_file_path, num_files=img_count, show_preview=False
+        )
+
+    return [output_file_path.format(i) for i in range(img_count)]
 
 
 def make_filename_base(camera: str, stage: int, row: int) -> str:
@@ -229,14 +220,13 @@ def make_filename_base(camera: str, stage: int, row: int) -> str:
 
 def make_filename_ts(filename_base) -> str:
     ts = time.strftime("%Y%m%d-%H%M%S")
-    return f"{filename_base}_{ts}.jpg"
+    return f"{filename_base}_{ts}" + "_{:d}.jpg"
 
 
 def move_files_to_remote(
     c: FabricConnection, local_paths: List[str], name: str
 ) -> List[str]:
     remote_save_dir = settings.REMOTE_SAVE_DIR
-    assert remote_save_dir
     relpaths = [os.path.sep.join(p.split(os.path.sep)[-2:]) for p in local_paths]
     remote_root = os.path.join(remote_save_dir, name)
     failures = []
@@ -269,9 +259,31 @@ def get_first_last_tmp_paths() -> List[str]:
     return [tmp1, tmp2]
 
 
+def cleanup_first_last(filepaths: List[str]):
+    for file in filepaths:
+        logger.debug(f"Removing {file}")
+        os.remove(file)
+
+
+def send_email(
+    success: bool,
+    emails: List[str],
+    experiment_name: str,
+    message: str,
+    first_last: List[str],
+):
+    fn = send_success_email if success else send_error_email
+
+    fn(
+        emails,
+        experiment_name,
+        message,
+        first_last,
+    )
+
+
 def ensure_remote_dirs_exist(remote_host_name, experiment_name) -> None:
     remote_save_dir = settings.REMOTE_SAVE_DIR
-    assert remote_save_dir
     with FabricConnection(remote_host_name) as c:
         with c.cd(remote_save_dir):
             c.run(f"mkdir -p {experiment_name}")
@@ -294,7 +306,9 @@ def make_unmoved_msg(unmoved_files: List[str]) -> str:
 
 
 def run_experiment(
-    config_path: str, test: bool = False, debug: bool = False
+    config_path: str,
+    test: bool = False,
+    debug: bool = False,
 ) -> List[str]:
     """Perform a run of the experiment
 
@@ -304,6 +318,9 @@ def run_experiment(
     :type test: bool, optional
     :param debug: Whether to print debugging messages, defaults to False
     :type debug: bool, optional
+
+    :return: The paths of the first and last images (only if testing)
+    :rtype: List[str]
     """
 
     if debug:
@@ -311,18 +328,21 @@ def run_experiment(
 
     experiment_config = read_and_validate_config(config_path)
     remote_host_name = settings.REMOTE_HOST_NAME
-    assert remote_host_name
 
-    experiment_name = experiment_config["name"]
+    experiment_name: str = experiment_config["name"]
 
     first_last = get_first_last_tmp_paths()
 
-    local_save_dir = os.path.join(experiment_config["output_dir"], experiment_name)
+    local_save_dir: str = os.path.join(experiment_config["output_dir"], experiment_name)
 
     if not test:
         ensure_remote_dirs_exist(remote_host_name, experiment_name)
 
     unmoved_files = []
+
+    email_msg = ""
+
+    SUCCESS = True
 
     try:
         home_actuator()
@@ -345,7 +365,7 @@ def run_experiment(
 
                     base_filename = make_filename_base(camera.name, i + 1, row + 1)
                     local_paths = take_stills(
-                        camera.name,
+                        camera,
                         local_save_dir,
                         base_filename,
                         experiment_config["number_of_images"],
@@ -363,42 +383,42 @@ def run_experiment(
                             unmoved_files.extend(_unmoved)
 
     except Exception as e:
-        # TODO: move into function
         logger.exception(e)
         exc_type, exc_value, exc_traceback = sys.exc_info()
         trace = "\n".join(
             traceback.format_exception(exc_type, exc_value, exc_traceback)
         )
 
-        unmoved_msg = make_unmoved_msg(unmoved_files)
+        SUCCESS = False
 
-        msg = unmoved_msg + str(e) + "\n\n" + trace
-        if not test:
-            send_error_email(
-                experiment_config["emails"],
-                experiment_name,
-                msg,
-                [p for p in first_last if p is not None],
-            )
+        email_msg = str(e) + "\n\n" + trace
+
         raise
 
     finally:
         time.sleep(1)
         home_actuator()
 
-    if not test:
-        logger.debug("Sending success email")
+        if not test:
 
-        unmoved_msg = make_unmoved_msg(unmoved_files)
+            logger.debug(f"Sending {'success' if SUCCESS else 'error'} email")
 
-        message = unmoved_msg + "The experiment ran successfully."
+            if SUCCESS:
+                email_msg = "The experiment ran successfully."
 
-        send_success_email(
-            experiment_config["emails"],
-            experiment_config["name"],
-            message,
-            first_last,
-        )
+            unmoved_msg = make_unmoved_msg(unmoved_files)
+
+            message = unmoved_msg + email_msg
+
+            send_email(
+                SUCCESS,
+                experiment_config["emails"],
+                experiment_name,
+                message,
+                first_last,
+            )
+
+            cleanup_first_last(first_last)
 
     return first_last
 
