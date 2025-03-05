@@ -54,10 +54,10 @@ class DuckCam(Picamera2):
             tuning=tuning,
         )
 
-    def __exit__(self, exc_type, exc_val, exc_traceback):
+    def stop(self):
         logger.debug("Cleaning up pins")
         gp.cleanup()
-        super().__exit__(exc_type, exc_val, exc_traceback)
+        super().stop()
 
 
 def set_axis_defaults(
@@ -106,7 +106,7 @@ def move_actuator(
     distance: int,
     unit: LengthUnits = Units.LENGTH_MILLIMETRES,
     device_port: str = DEVICE_PORT,
-):
+) -> float:
     """Move the actuator forward by the provided distance
 
     :param distance: How far to move the actuator
@@ -124,6 +124,7 @@ def move_actuator(
         logger.debug(f"Moving actuator {distance} {unit}")
         axis.move_relative(distance, unit)
         time.sleep(1)
+        return axis.get_position(unit=unit)
 
 
 def setup_gpio_pins():
