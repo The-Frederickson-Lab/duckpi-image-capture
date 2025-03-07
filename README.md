@@ -14,6 +14,8 @@ Note also that `fabric` will use the `config` file in `~/.ssh` to configure conn
 
 The `picamera2` package should also be installed. It is best to do so with `apt` rather than `poetry` in order to avoid system dependency issues.
 
+Note that `Pillow` will need the `libjpeg-dev` dependency installed.
+
 ## Notes
 
 [ImagingSystemCode_22-8-24_aquascape_full.py](ImagingSystemCode_22-8-24_aquascape_full.py) is an archive of the image capture script currently on pi 44.

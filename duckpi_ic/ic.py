@@ -3,12 +3,13 @@
 from enum import Enum
 import logging
 import os
+from pathlib import Path
 import shutil
 import sys
 from tempfile import mkstemp
 import time
 import traceback
-from typing import List
+from typing import List, Optional
 
 from fabric import Connection as FabricConnection
 from picamera2 import Picamera2
@@ -31,8 +32,7 @@ logger = logging.getLogger(__name__)
 
 Library.enable_device_db_store()
 
-
-DEVICE_PORT = "/dev/ttyUSB0"
+DEVICE_PORT = settings.DEVICE_PORT
 
 
 # camera order from door: C (2), A (0), B (1), D (3)
@@ -65,7 +65,7 @@ def set_axis_defaults(
     acceleration: int = 2,
     deceleration: int = 2,
     max_speed: int = 20,
-):
+) -> None:
     """Set actuator defaults
 
     :param axis: the axis whose settings we want to set
@@ -87,7 +87,7 @@ def set_axis_defaults(
     axis.settings.set("motion.decelonly", deceleration, Units.NATIVE)
 
 
-def home_actuator(device_port: str = DEVICE_PORT):
+def home_actuator(device_port: str = DEVICE_PORT) -> None:
     """Set actuator to default position
 
     :param device_port: The actuator's port, defaults to DEVICE_PORT
@@ -102,9 +102,27 @@ def home_actuator(device_port: str = DEVICE_PORT):
         time.sleep(1)
 
 
+def get_actuator_position(
+    unit: LengthUnits = Units.LENGTH_MILLIMETRES, device_port: str = DEVICE_PORT
+) -> float:
+    """Get the current position of the actuator
+
+    :param unit: The units to use, defaults to Units.LENGTH_MILLIMETRES
+    :type unit: Unit, optional
+    :param device_port: The device port, defaults to DEVICE_PORT
+    :type device_port: str, optional
+    :return: The actuator position
+    :rtype: float
+    """
+    with Connection.open_serial_port(device_port) as connection:
+        device_list = connection.detect_devices()
+        axis = device_list[0].get_axis(1)
+        return axis.get_position(unit=unit)
+
+
 def move_actuator(
     distance: int,
-    unit: LengthUnits = Units.LENGTH_MILLIMETRES,
+    unit: Optional[LengthUnits] = None,
     device_port: str = DEVICE_PORT,
 ) -> float:
     """Move the actuator forward by the provided distance
@@ -121,13 +139,33 @@ def move_actuator(
         axis = device_list[0].get_axis(1)
         set_axis_defaults(axis)
 
+        if unit is None:
+            unit = Units.LENGTH_MILLIMETRES
+
         logger.debug(f"Moving actuator {distance} {unit}")
         axis.move_relative(distance, unit)
         time.sleep(1)
         return axis.get_position(unit=unit)
 
 
-def setup_gpio_pins():
+def move_actuator_relative(distance: int, unit: Optional[LengthUnits] = None) -> None:
+    """Calculate relative distance after subtracting distance already covered
+
+    :param distance: The distance from home
+    :type distance: int
+    :param unit: The unit to use, defaults to Units.LENGTH_MILLIMETRES
+    :type unit: LengthUnits, optional
+    """
+    if unit is None:
+        unit = Units.LENGTH_MILLIMETRES
+
+    current_pos = round(get_actuator_position(unit))
+    _distance = round(distance - current_pos)
+
+    move_actuator(_distance, unit)
+
+
+def setup_gpio_pins() -> None:
     """Put GPIO pins in default configuration"""
     logger.debug("setting up gpio pins")
     gp.cleanup()
@@ -148,7 +186,7 @@ def setup_gpio_pins():
     gp.output(22, True)
 
 
-def start_camera(camera_id: str):
+def start_camera(camera_id: str) -> None:
     """Start the indicated camera
 
     :param camera_id: The string identifier of the camera
@@ -205,6 +243,8 @@ def take_stills(
         output_directory, f"camera{camera.name}", make_filename_ts(base_filename)
     )
 
+    Path(output_file_path).parent.mkdir(exist_ok=True, parents=True)
+
     logger.debug(f"Saving {img_count} images to {output_file_path}")
 
     with DuckCam(camera) as cam:
@@ -235,14 +275,11 @@ def move_files_to_remote(
         try:
             logger.debug(f"Moving {local_path} to {os.path.join(remote_root, relpath)}")
             c.put(local_path, os.path.join(remote_root, relpath))
-            SUCCESS = True
+            # logger.debug(f"deleting {local_path}")
+            # os.remove(local_path)
         except Exception as e:
             logger.exception(e)
             failures.append(local_path)
-            SUCCESS = False
-        if SUCCESS:
-            logger.debug(f"deleting {local_path}")
-            os.remove(local_path)
     return failures
 
 
@@ -272,7 +309,7 @@ def send_email(
     experiment_name: str,
     message: str,
     first_last: List[str],
-):
+) -> None:
     fn = send_success_email if success else send_error_email
 
     fn(
@@ -349,8 +386,8 @@ def run_experiment(
         home_actuator()
 
         for i, stage in enumerate(experiment_config["stages"]):
-            # stage_distance is relative to previous row
-            move_actuator(
+            # stage_distance is distance from home, so we need to calculate relative to current position
+            move_actuator_relative(
                 stage["stage_distance"]["length"], stage["stage_distance"].get("units")
             )
             for row in range(stage["rows"]):
@@ -435,7 +472,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "config_path",
         type=str,
-        required=True,
         help="Path to a yml file that contains the configuration for the run",
     )
 

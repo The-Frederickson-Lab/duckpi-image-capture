@@ -4,7 +4,7 @@ from os import path
 import smtplib
 from typing import Optional, List, Union
 
-from schema import Schema, And, Optional
+from schema import Schema, And, Optional, Use
 from yaml import safe_load
 
 from duckpi_ic.settings import settings
@@ -29,20 +29,49 @@ def read_and_validate_config(config_path: str):
 
 
 def validate_config(config: dict):
-    length_schema = Schema({"length": int, Optional("units"): str})
+    def make_length_schema(field_name: str):
+        return Schema(
+            {
+                "length": And(
+                    int, lambda n: n > 0, error=f"{field_name} must be greater than 0."
+                ),
+                Optional("units"): str,
+            }
+        )
 
     schema = Schema(
         {
-            "name": And(str, len),
-            "output_dir": And(str, len, path.exists),
-            "number_of_images": (int),
-            "emails": [And(str, len)],
+            "name": And(str, len, error="`name` is required and must be a string."),
+            "output_dir": And(
+                str,
+                lambda n: len(n) >= 1,
+                path.exists,
+                error="`output_dir` is required and must exist.",
+            ),
+            "number_of_images": And(
+                int,
+                lambda n: n > 0,
+                error="`number_of_images` is required and must be greater than 0.",
+            ),
+            "emails": [
+                And(
+                    str,
+                    lambda x: len(x) > 5,
+                    error="At least one email is required!",
+                )
+            ],
             "stages": [
                 Schema(
                     {
-                        "row_distance": length_schema,
-                        "rows": int,
-                        "stage_distance": length_schema,
+                        "row_distance": make_length_schema("`row_distance`"),
+                        "rows": And(
+                            int,
+                            lambda n: n > 0,
+                            error="`rows` is required and must be greater than 0",
+                        ),
+                        "stage_distance": make_length_schema(
+                            "`stage_distance (from home)`"
+                        ),
                     }
                 )
             ],
