@@ -392,7 +392,7 @@ class YAMLSpec:
             run_experiment(str(yml_path), test=True, debug=True)
             frm = customtkinter.CTkScrollableFrame(self.frame, height=300)
             frm.grid(row=19, column=0, columnspan=6, sticky=(N, S, E, W))
-            imgs = list(save_dir.rglob("*.jpg"))
+            imgs = sorted(list(save_dir.rglob("*.jpg")))
             for i, pth in enumerate(imgs):
                 img = Image.open(pth)
                 img.resize((100, 100))
@@ -407,7 +407,8 @@ class YAMLSpec:
 class Preview:
     def __init__(self, frame: customtkinter.CTkFrame):
         self.frame = frame
-        self.actuator_distance = StringVar()
+        self.distance_to_move_actuator = StringVar()
+        self.actuator_position = StringVar()
         self.actuator_moving = BooleanVar()
         self.selected_camera = StringVar()
 
@@ -424,7 +425,9 @@ class Preview:
         customtkinter.CTkButton(
             self.frame,
             text="Move Actuator",
-            command=lambda: self.move_actuator(to_int(self.actuator_distance.get())),
+            command=lambda: self.move_actuator(
+                to_int(self.distance_to_move_actuator.get())
+            ),
         ).grid(column=0, row=2, sticky=E, padx=5, pady=5)
 
         customtkinter.CTkButton(
@@ -444,7 +447,7 @@ class Preview:
         customtkinter.CTkEntry(
             self.frame,
             width=50,
-            textvariable=self.actuator_distance,
+            textvariable=self.distance_to_move_actuator,
             validate="key",
             validatecommand=check_num_wrapper,
         ).grid(column=1, row=2, padx=5, pady=5)
@@ -454,6 +457,14 @@ class Preview:
             width=50,
             text="mm",
         ).grid(column=2, row=2, padx=5, pady=5, sticky=W)
+
+        customtkinter.CTkLabel(self.frame, width=50, text="position").grid(
+            column=3, row=2, padx=5, pady=5, sticky=W
+        )
+
+        customtkinter.CTkLabel(
+            self.frame, width=50, textvariable=self.actuator_position
+        ).grid(column=4, row=2, padx=5, pady=5, sticky=W)
 
         self.preview_button = customtkinter.CTkButton(
             self.frame,
@@ -473,12 +484,13 @@ class Preview:
 
     def home_actuator(self):
         home_actuator()
-        self.actuator_distance.set("")
+        self.distance_to_move_actuator.set("")
 
     def move_actuator(self, distance: int = 0):
         if distance > 0:
             position = move_actuator(distance)
-            self.actuator_distance.set(str(round(position)))
+            self.actuator_position.set(str(round(position)))
+            self.distance_to_move_actuator.set("")
 
     def start_preview(self):
         logger.info("starting preview....")
@@ -493,13 +505,15 @@ class Preview:
             logger.info("preview started....")
 
     def reset(self):
-        self.actuator_distance.set("")
+        self.distance_to_move_actuator.set("")
+        self.home_actuator()
         self.selected_camera.set("")
-        self.preview_button["state"] = "normal"
         if self.selected_camera_instance:
             logger.info("closing camera instance")
             self.selected_camera_instance.close()
             self.selected_camera_instance = None
+        self.actuator_position.set("")
+        self.preview_button["state"] = "normal"
 
 
 YAMLSpec(tab1)
