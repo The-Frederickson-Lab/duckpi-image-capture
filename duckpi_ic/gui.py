@@ -10,8 +10,9 @@ from tkinter import (
     W,
     E,
     S,
-    StringVar,
     BooleanVar,
+    DoubleVar,
+    StringVar,
 )
 from tkinter.messagebox import showinfo
 from tkinter.simpledialog import Dialog
@@ -23,7 +24,14 @@ from PIL import Image
 from schema import SchemaError
 import yaml
 
-from duckpi_ic.ic import Cameras, DuckCam, move_actuator, home_actuator, run_experiment
+from duckpi_ic.ic import (
+    Cameras,
+    DuckCam,
+    move_actuator,
+    home_actuator,
+    run_experiment,
+    get_actuator_position,
+)
 from duckpi_ic.settings import settings
 from duckpi_ic.util import validate_config
 
@@ -54,7 +62,7 @@ customtkinter.set_default_color_theme("blue")
 root.grid_rowconfigure(0, weight=1)  # configure grid system
 root.grid_columnconfigure(0, weight=1)
 root.title("Set Up An Experiment")
-root.geometry("700x900")
+root.geometry("800x950")
 
 
 class SessionDialog(Dialog):
@@ -129,6 +137,12 @@ def delete_current_session(pth: Path):
     root.destroy()
 
 
+def get_image_pos(image_name: Path):
+    _, cam, stage, row, _, _ = os.path.basename(str(image_name)).split("_")
+
+    return f"{stage}_{row}_{cam}"
+
+
 class SaveSuccessDialog(Dialog):
     def __init__(self, parent, title, executable_path: str, yaml_path: str):
         self.command = f"{executable_path} {yaml_path}"
@@ -163,9 +177,7 @@ class StageEntry:
             column=base_col + 1, row=base_row, sticky=(W), padx=5
         )
 
-        self.distance_label = "Distance from home"
-
-        customtkinter.CTkLabel(frame, text=self.distance_label).grid(
+        customtkinter.CTkLabel(frame, text="Distance from home").grid(
             column=base_col, row=base_row, sticky=W
         )
 
@@ -254,9 +266,9 @@ class YAMLSpec:
 
         self.stage_3_entries = StageEntry(frame, base_row=6, base_col=4)
 
-        self.yaml_result = customtkinter.CTkTextbox(frame, width=400)
+        self.yaml_result = customtkinter.CTkTextbox(frame, width=550, height=250)
 
-        self.yaml_result.grid(column=0, row=17, pady=10, columnspan=6)
+        self.yaml_result.grid(column=0, row=17, pady=10, columnspan=5)
 
         customtkinter.CTkButton(frame, text="Test", command=self.run_job).grid(
             column=0, row=18
@@ -382,6 +394,7 @@ class YAMLSpec:
         with TemporaryDirectory() as t:
             config_dict = self._build_config_dict()
             config_dict["output_dir"] = t
+            config_dict["number_of_images"] = 1
             yml_str = self._build_yaml(config_dict)
             yml_path = Path(t) / "config.yml"
             with open(yml_path, "w") as f:
@@ -392,15 +405,15 @@ class YAMLSpec:
             run_experiment(str(yml_path), test=True, debug=True)
             frm = customtkinter.CTkScrollableFrame(self.frame, height=300)
             frm.grid(row=19, column=0, columnspan=6, sticky=(N, S, E, W))
-            imgs = sorted(list(save_dir.rglob("*.jpg")))
+            imgs = sorted(list(save_dir.rglob("*.jpg")), key=get_image_pos)
             for i, pth in enumerate(imgs):
                 img = Image.open(pth)
-                img.resize((100, 100))
-                tk_img = customtkinter.CTkImage(dark_image=img, size=(100, 100))
+                img.resize((140, 140))
+                tk_img = customtkinter.CTkImage(dark_image=img, size=(140, 140))
                 lbl = customtkinter.CTkLabel(
-                    frm, image=tk_img, text=os.path.basename(str(pth)), compound="top"
+                    frm, image=tk_img, text=get_image_pos(pth), compound="top"
                 )
-                row, col = i // 2, i % 2
+                row, col = i // 4, i % 4
                 lbl.grid(row=row, column=col, padx=5, pady=5)
 
 
@@ -408,41 +421,60 @@ class Preview:
     def __init__(self, frame: customtkinter.CTkFrame):
         self.frame = frame
         self.distance_to_move_actuator = StringVar()
-        self.actuator_position = StringVar()
+        self.actuator_position = DoubleVar()
+        self.actuator_position.set(get_actuator_position())
         self.actuator_moving = BooleanVar()
         self.selected_camera = StringVar()
 
         self.selected_camera_instance = None
 
-        camera_label = customtkinter.CTkLabel(self.frame, text="Select a Camera")
+        camera_label = customtkinter.CTkLabel(
+            self.frame,
+            text="Select a Camera",
+        )
         camera_label.grid(
             column=0,
             row=0,
             padx=5,
-            pady=5,
+            pady=15,
         )
 
-        customtkinter.CTkButton(
+        self.move_actuator_button = customtkinter.CTkButton(
             self.frame,
             text="Move Actuator",
             command=lambda: self.move_actuator(
                 to_int(self.distance_to_move_actuator.get())
             ),
-        ).grid(column=0, row=2, sticky=E, padx=5, pady=5)
+            state="disabled",
+        )
 
-        customtkinter.CTkButton(
+        self.move_actuator_button.grid(column=0, row=1, sticky=E, padx=5, pady=15)
+
+        self.home_actuator_button = customtkinter.CTkButton(
             self.frame,
             text="Home Actuator",
             command=self.home_actuator,
-        ).grid(column=0, row=4, sticky=E, padx=5, pady=5)
-
-        camera_list = [cam.name for cam in Cameras]
-
-        camera_menu = customtkinter.CTkOptionMenu(
-            self.frame, values=camera_list, variable=self.selected_camera
+            state="disabled",
         )
 
-        camera_menu.grid(column=1, row=0, padx=5, pady=5, columnspan=2)
+        self.home_actuator_button.grid(
+            column=0,
+            row=2,
+            sticky=E,
+            padx=5,
+            pady=15,
+        )
+
+        self.camera_list = [cam.name for cam in Cameras]
+
+        self.camera_menu = customtkinter.CTkOptionMenu(
+            self.frame,
+            values=self.camera_list,
+            variable=self.selected_camera,
+            command=self.set_selected_camera,
+        )
+
+        self.camera_menu.grid(column=1, row=0, padx=5, pady=15, columnspan=2)
 
         customtkinter.CTkEntry(
             self.frame,
@@ -450,37 +482,41 @@ class Preview:
             textvariable=self.distance_to_move_actuator,
             validate="key",
             validatecommand=check_num_wrapper,
-        ).grid(column=1, row=2, padx=5, pady=5)
+        ).grid(column=1, row=1, pady=15, sticky=E)
 
         customtkinter.CTkLabel(
             self.frame,
             width=50,
             text="mm",
-        ).grid(column=2, row=2, padx=5, pady=5, sticky=W)
+        ).grid(column=2, row=1, pady=15, sticky=W)
 
-        customtkinter.CTkLabel(self.frame, width=50, text="position").grid(
-            column=3, row=2, padx=5, pady=5, sticky=W
+        customtkinter.CTkLabel(self.frame, width=50, text="Distance from home:").grid(
+            column=3, row=1, padx=5, pady=15, sticky=W
         )
 
         customtkinter.CTkLabel(
             self.frame, width=50, textvariable=self.actuator_position
-        ).grid(column=4, row=2, padx=5, pady=5, sticky=W)
+        ).grid(column=4, row=1, pady=15, sticky=W)
 
         self.preview_button = customtkinter.CTkButton(
             self.frame,
             text="Start Preview",
             command=self.start_preview,
+            state="disabled",
         )
 
-        self.preview_button.grid(
-            column=3, row=0, padx=5, pady=5, sticky=W, columnspan=2
+        self.preview_button.grid(column=4, row=0, padx=5, pady=5, sticky=W)
+
+        self.reset_button = customtkinter.CTkButton(
+            self.frame, text="Stop Preview", command=self.reset, state="disabled"
         )
 
-        customtkinter.CTkButton(
-            self.frame,
-            text="Reset",
-            command=self.reset,
-        ).grid(column=4, row=4, sticky=E, padx=5, pady=5)
+        self.reset_button.grid(column=4, row=4, sticky=E, padx=5, pady=15)
+
+    def set_selected_camera(self, camera):
+        if camera in self.camera_list:
+            self.preview_button.configure(state="normal")
+            self.selected_camera.set(camera)
 
     def home_actuator(self):
         home_actuator()
@@ -489,16 +525,20 @@ class Preview:
     def move_actuator(self, distance: int = 0):
         if distance > 0:
             position = move_actuator(distance)
-            self.actuator_position.set(str(round(position)))
+            self.actuator_position.set(round(position))
             self.distance_to_move_actuator.set("")
 
     def start_preview(self):
         logger.info("starting preview....")
         if (
-            self.selected_camera.get() is not None
+            self.selected_camera.get() in self.camera_list
             and self.selected_camera_instance is None
         ):
-            self.preview_button["state"] = "disabled"
+            self.preview_button.configure(state="disabled")
+            self.camera_menu.configure(state="disabled")
+            self.reset_button.configure(state="normal")
+            self.move_actuator_button.configure(state="normal")
+            self.home_actuator_button.configure(state="normal")
             self.selected_camera_instance = DuckCam(Cameras[self.selected_camera.get()])
             self.selected_camera_instance.start_preview(PreviewType.QT)
             self.selected_camera_instance.start()
@@ -512,8 +552,11 @@ class Preview:
             logger.info("closing camera instance")
             self.selected_camera_instance.close()
             self.selected_camera_instance = None
-        self.actuator_position.set("")
-        self.preview_button["state"] = "normal"
+        self.actuator_position.set(get_actuator_position())
+        self.camera_menu.configure(state="normal")
+        self.reset_button.configure(state="disabled")
+        self.move_actuator_button.configure(state="disabled")
+        self.home_actuator_button.configure(state="disabled")
 
 
 YAMLSpec(tab1)
