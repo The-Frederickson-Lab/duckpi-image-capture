@@ -102,6 +102,90 @@ class SessionDialog(Dialog):
         delete_button.pack(side="right")
 
 
+class Help:
+    def __init__(self, frame: customtkinter.CTkFrame):
+        self.frame = frame
+        self.parent = frame.winfo_toplevel()
+        customtkinter.CTkLabel(self.frame, text="Overview").grid(column=0, row=0)
+        t1 = customtkinter.CTkTextbox(self.frame, height=100, width=700, wrap="word")
+
+        text1 = (
+            "This application is intended to help set up duckweed experiments "
+            "by giving live previews of the camera at various actuator positions."
+            " You can use these positions to create a config file for your experiment,"
+            " which you can then test to ensure that the results are what you would expect."
+            "When you are satisfied with the configuration, you can save it to storage and "
+            "paste the provided command into the crontab."
+        )
+
+        t1.insert("1.0", text1)
+
+        t1.grid(column=0, row=1)
+
+        t1.configure(state="disabled")
+
+        customtkinter.CTkLabel(self.frame, text="Using the Preview Tab").grid(
+            column=0, row=5, pady=6
+        )
+
+        t2 = customtkinter.CTkTextbox(self.frame, height=160, width=700, wrap="word")
+
+        text2 = (
+            "The preview tab allows you to see a live preview of any of the four cameras. "
+            "To begin, select a camera from the dropdown and click `Start Preview`. "
+            "You can enter a distance in the text box and then click `Move Actuator` to "
+            "move the actuator that distance forward. The current location of the actuator "
+            "is indicated by the number to the right. Note that this number shows "
+            "the total distance from home. When you are finished with the preview, click "
+            "`Stop Preview` in order to shut the camera off properly. Try to avoid closing "
+            "the preview window by clicking its close icon, since this will just close the window "
+            "but keep the camera active. To deactivate the camera safely, click `Stop Preview`, "
+            "even if the preview window has been closed. You can then select another camera as "
+            "needed. When you are finished with the preview tab, remember to return the actuator "
+            "to its original position by clicking `Home Actuator`."
+        )
+
+        t2.insert("1.0", text2)
+
+        t2.grid(column=0, row=6)
+
+        t2.configure(state="disabled")
+
+        customtkinter.CTkLabel(self.frame, text="Using the Config Tab").grid(
+            column=0, row=12, pady=6
+        )
+
+        t3 = customtkinter.CTkTextbox(self.frame, height=460, width=700, wrap="word")
+
+        text3 = (
+            "The Config Tab is where you create your config file, typically by entering "
+            "measurements acquired from the Preview Tab. The first step is to fill out the "
+            "form, including measurements for each stage (only one stage is required). "
+            "Here is a quick description of the "
+            "fields:\n\n**Name**: The name of the experiment. All files will be saved in a directory "
+            "with this name, so it should be unique. \n\n**Output Directory**: The full path to the "
+            "directory where the results should be stored locally. The experiment name will be appended to it, "
+            "so that if the output directory is `/tmp` and the experiment name is `test`, the results will be "
+            "saved to `/tmp/test`.\n\n**Emails**: A comma-separated list of emails where notifications "
+            "will be sent. \n\n**Image Count**: The number of pictures to take with each camera at each row."
+            "\n\n**Distance from Home**: The distance from the actuator's home position to the first row "
+            "of this stage.\n\n**Row Count**: The number of rows in this stage.\n\n**Distance between rows**: "
+            "The distance from one row to the next in this stage. It is assumed the rows are evenly spaced.\n\n"
+            "You can view the raw YAML text by pressing the `View` button, and you can complete a test run of the "
+            "experiment by clicking `Test`. Note that the test will run the experiment in test mode, meaning that "
+            "no emails should be sent, no pictures will be saved locally or remotely, and only one image will be taken "
+            "per camera, per row. When you are satisfied with the configuration, you can click `Save` to save the "
+            "file to the Pi. Once saved, a pop-up window will appear with a run command that you can paste into the "
+            "crontab."
+        )
+
+        t3.insert("1.0", text3)
+
+        t3.grid(column=0, row=13)
+
+        t3.configure(state="disabled")
+
+
 if len(existing_session):
     dialogue = SessionDialog(
         root, "Active session found!", existing_session, NEW_SESSION_PATH
@@ -113,6 +197,7 @@ else:
 tab_control = customtkinter.CTkTabview(master=root)
 tab1 = tab_control.add("Config")
 tab2 = tab_control.add("Preview")
+tab3 = tab_control.add("Help")
 tab_control.set("Config")
 # ensure tab/content fills the window
 tab_control.grid(row=0, column=0, padx=20, pady=20, sticky=(N, S, E, W))
@@ -422,7 +507,7 @@ class Preview:
         self.frame = frame
         self.distance_to_move_actuator = StringVar()
         self.actuator_position = DoubleVar()
-        self.actuator_position.set(get_actuator_position())
+        self.actuator_position.set(round(get_actuator_position()))
         self.actuator_moving = BooleanVar()
         self.selected_camera = StringVar()
 
@@ -454,7 +539,6 @@ class Preview:
             self.frame,
             text="Home Actuator",
             command=self.home_actuator,
-            state="disabled",
         )
 
         self.home_actuator_button.grid(
@@ -521,6 +605,7 @@ class Preview:
     def home_actuator(self):
         home_actuator()
         self.distance_to_move_actuator.set("")
+        self.actuator_position.set(round(get_actuator_position()))
 
     def move_actuator(self, distance: int = 0):
         if distance > 0:
@@ -538,7 +623,6 @@ class Preview:
             self.camera_menu.configure(state="disabled")
             self.reset_button.configure(state="normal")
             self.move_actuator_button.configure(state="normal")
-            self.home_actuator_button.configure(state="normal")
             self.selected_camera_instance = DuckCam(Cameras[self.selected_camera.get()])
             self.selected_camera_instance.start_preview(PreviewType.QT)
             self.selected_camera_instance.start()
@@ -546,21 +630,22 @@ class Preview:
 
     def reset(self):
         self.distance_to_move_actuator.set("")
-        self.home_actuator()
+        # self.home_actuator()
         self.selected_camera.set("")
         if self.selected_camera_instance:
             logger.info("closing camera instance")
             self.selected_camera_instance.close()
             self.selected_camera_instance = None
-        self.actuator_position.set(get_actuator_position())
+        # self.actuator_position.set(get_actuator_position())
         self.camera_menu.configure(state="normal")
         self.reset_button.configure(state="disabled")
         self.move_actuator_button.configure(state="disabled")
-        self.home_actuator_button.configure(state="disabled")
 
 
 YAMLSpec(tab1)
 Preview(tab2)
+Help(tab3)
+
 
 root.protocol("WM_DELETE_WINDOW", lambda: delete_current_session(NEW_SESSION_PATH))
 
