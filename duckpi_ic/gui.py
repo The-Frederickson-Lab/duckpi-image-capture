@@ -230,7 +230,8 @@ def get_image_pos(image_name: Path):
 
 class SaveSuccessDialog(Dialog):
     def __init__(self, parent, title, executable_path: str, yaml_path: str):
-        self.command = f"{executable_path} {yaml_path}"
+        ic_path = str(Path(__file__).parent / "ic.py")
+        self.command = f"{executable_path} {ic_path} {yaml_path}"
         self.parent = parent
         super().__init__(parent, title)
 
