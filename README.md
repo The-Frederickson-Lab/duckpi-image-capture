@@ -42,6 +42,7 @@ The GUI can be accessed via SSH. In order to use the GUI remotely on your home m
 
     Then you can SSH in by just typing `ssh pi-18`. You can find more information [here](https://docs.alliancecan.ca/wiki/SSH_configuration_file).
 3. Use a script to launch the GUI. Currently there are scripts in the Pi home directories called `start-gui`. Once you have your key-based SSH login and config set up (with, say, `pi-18` as an alias), you can launch the GUI by entering `ssh pi-18 ./start-gui`.
+4. **For windows users**: This process seems to go the most smoothly when using the [MobaXterm](https://mobaxterm.mobatek.net/) terminal application.
 
 ## Notes
 
