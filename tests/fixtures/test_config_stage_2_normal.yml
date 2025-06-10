@@ -1,0 +1,26 @@
+# Note that all distances are relative to previous position.
+# E.g., the first `stage_distance` is relative to the "home" position of the actuator.
+# Currently it's assumed that `row_distance` is the same for each row in a stage.
+
+name: test-experiment
+output_dir: /tmp
+number_of_images: 4
+emails:
+  - test@example.com
+  - test2@example.com
+stages:
+  -
+    stage_distance:
+      length: 40
+      units: mm
+    rows: 4
+    row_distance:
+      length: 128
+      units: mm
+  -
+    stage_distance:
+      length: 600
+    rows: 4
+    row_distance:
+      length: 100
+      units: mm

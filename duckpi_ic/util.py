@@ -4,7 +4,7 @@ from os import path
 import smtplib
 from typing import Optional, List, Union
 
-from schema import Schema, And, Optional, Use
+from schema import Schema, And, Optional, SchemaError
 from yaml import safe_load
 
 from duckpi_ic.settings import settings
@@ -29,6 +29,31 @@ def read_and_validate_config(config_path: str):
 
 
 def validate_config(config: dict):
+
+    max_dist = settings.MAX_DISTANCE
+    if max_dist:
+        max_dist = int(max_dist)
+    else:
+        max_dist = None
+
+    prev_stage_length = 0
+    for i, stage in enumerate(config["stages"]):
+        stage_distance = stage["stage_distance"]["length"]
+        if stage_distance < prev_stage_length:
+            raise SchemaError(
+                autos=None,
+                errors=[
+                    f"Size of stage {i-1} {prev_stage_length} is longer than `distance_from_home` of next stage ({stage_distance})!"
+                ],
+            )
+        row_distance = stage["row_distance"]["length"] * stage["rows"]
+        stage_span = row_distance + stage_distance
+        if max_dist is not None and stage_span > max_dist:
+            raise SchemaError(
+                autos=None, errors=[f"Stages exceed max length of {max_dist}!"]
+            )
+        prev_stage_length = stage_span
+
     def make_length_schema(field_name: str):
         return Schema(
             {
@@ -69,8 +94,12 @@ def validate_config(config: dict):
                             lambda n: n > 0,
                             error="`rows` is required and must be greater than 0",
                         ),
-                        "stage_distance": make_length_schema(
-                            "`stage_distance (from home)`"
+                        # this could be zero, but will fail above validation
+                        "stage_distance": Schema(
+                            {
+                                "length": int,
+                                Optional("units"): str,
+                            }
                         ),
                     }
                 )
